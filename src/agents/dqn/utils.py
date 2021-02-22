@@ -12,6 +12,7 @@ Transition = namedtuple(
     'Transition', ('state', 'action', 'reward', 'state_next', 'done')
 )
 
+
 class TestMetric(Enum):
 
     CUMULATIVE_REWARD = 1
@@ -20,11 +21,13 @@ class TestMetric(Enum):
     MAX_CUT = 4
     FINAL_CUT = 5
 
+
 def set_global_seed(seed, env):
     torch.manual_seed(seed)
-    env.set_seed(seed)
+    env.set_seed(seed)  # seed in the training environment
     np.random.seed(seed)
     random.seed(seed)
+
 
 class ReplayBuffer:
     def __init__(self, capacity):
@@ -32,9 +35,9 @@ class ReplayBuffer:
         self._memory = {}
         self._position = 0
 
-        self.next_batch_process=None
-        self.next_batch_size=None
-        self.next_batch_device=None
+        self.next_batch_process = None
+        self.next_batch_size = None
+        self.next_batch_device = None
         self.next_batch = None
 
     def add(self, *args):
@@ -44,8 +47,9 @@ class ReplayBuffer:
         if self.next_batch_process is not None:
             # Don't add to the buffer when sampling from it.
             self.next_batch_process.join()
-        self._memory[self._position] = Transition(*args)
-        self._position = (self._position + 1) % self._capacity
+
+        self._memory[self._position] = Transition(*args)  # add sars + (done?)
+        self._position = (self._position + 1) % self._capacity  # position++
 
     def _prepare_sample(self, batch_size, device=None):
         self.next_batch_size = batch_size
@@ -53,11 +57,13 @@ class ReplayBuffer:
 
         batch = random.sample(list(self._memory.values()), batch_size)
 
-        self.next_batch = [torch.stack(tensors).to(device) for tensors in zip(*batch)]
+        self.next_batch = [torch.stack(tensors).to(device)
+                           for tensors in zip(*batch)]
         self.next_batch_ready = True
 
     def launch_sample(self, *args):
-        self.next_batch_process = threading.Thread(target=self._prepare_sample, args=args)
+        self.next_batch_process = threading.Thread(
+            target=self._prepare_sample, args=args)
         self.next_batch_process.start()
 
     def sample(self, batch_size, device=None):
@@ -67,15 +73,17 @@ class ReplayBuffer:
         Return a list of tensors in the order specified in Transition.
         """
         if self.next_batch_process is not None:
-            self.next_batch_process.join()
-        else:
+            self.next_batch_process.join()  # join -> won't continue unless next_batch_process (process) finishes its job
+
+        else:  # no current process -> sample another batch
             self.launch_sample(batch_size, device)
             self.sample(batch_size, device)
 
-        if self.next_batch_size==batch_size and self.next_batch_device==device:
+        if self.next_batch_size == batch_size and self.next_batch_device == device:
             next_batch = self.next_batch
             self.launch_sample(batch_size, device)
             return next_batch
+
         else:
             self.launch_sample(batch_size, device)
             self.sample(batch_size, device)
@@ -84,7 +92,7 @@ class ReplayBuffer:
         return len(self._memory)
 
 
-class PrioritisedReplayBuffer:
+class PrioritisedReplayBuffer:  # Prioritized Replay
 
     def __init__(self, capacity=10000, alpha=0.7, beta0=0.5):
 
@@ -92,10 +100,10 @@ class PrioritisedReplayBuffer:
         self._capacity = capacity
 
         # A binary (max-)heap of the buffer contents, sorted by the td_error <--> priority.
-        self.priority_heap = {}  # heap_position : [buffer_position, td_error, transition]
+        # heap_position : [buffer_position, td_error, transition]
+        self.priority_heap = {}
 
-        # Maps a buffer position (when the transition was added) to the position of the
-        # transition in the priority_heap.
+        # Maps a buffer position (when the transition was added) to the position of the transition in the priority_heap.
         self.buffer2heap = {}  # buffer_position : heap_position
 
         # The current position in the replay buffer.  Starts at 1 for ease of binary-heap calcs.
@@ -125,11 +133,13 @@ class PrioritisedReplayBuffer:
         memory.
         """
         # By default a new transition has equal highest priority in the heap.
-        trans = [self._buffer_position, self.__get_max_td_err(), Transition(*args)]
+        trans = [self._buffer_position,
+                 self.__get_max_td_err(), Transition(*args)]
         try:
             # Find the heap position of the transition to be replaced
             heap_pos = self.buffer2heap[self._buffer_position]
-            self.full = True  # We found a transition in this buffer slot --> the memory is at capacity.
+            # We found a transition in this buffer slot --> the memory is at capacity.
+            self.full = True
         except KeyError:
             # No transition in the buffer slot, therefore we will be adding one fresh.
             heap_pos = self._buffer_position
@@ -187,7 +197,8 @@ class PrioritisedReplayBuffer:
         """
         rebalance priority_heap
         """
-        sort_array = sorted(self.priority_heap.values(), key=lambda x: x[1], reverse=True)
+        sort_array = sorted(self.priority_heap.values(),
+                            key=lambda x: x[1], reverse=True)
         # reconstruct priority_queue
         self.priority_heap.clear()
         self.buffer2heap.clear()
@@ -204,7 +215,8 @@ class PrioritisedReplayBuffer:
     def update_partitions(self, num_partitions):
 
         # P(t_i) = p_i^alpha / Sum_k(p_k^alpha), where the priority p_i = 1 / rank_i.
-        priorities = [math.pow(rank, -self.alpha) for rank in range(1, len(self.priority_heap) + 1)]
+        priorities = [math.pow(rank, -self.alpha)
+                      for rank in range(1, len(self.priority_heap) + 1)]
         priorities_sum = sum(priorities)
         probabilities = dict(
             [(rank0index + 1, priority / priorities_sum) for rank0index, priority in enumerate(priorities)])
@@ -229,7 +241,7 @@ class PrioritisedReplayBuffer:
         return partitions, probabilities
 
     def update_priorities(self, buffer_positions, td_error):
-        for buf_id, td_err in  zip(buffer_positions, td_error):
+        for buf_id, td_err in zip(buffer_positions, td_error):
             heap_id = self.buffer2heap[buf_id]
             [id, _, trans] = self.priority_heap[heap_id]
             self.priority_heap[heap_id] = [id, td_err, trans]
@@ -243,7 +255,8 @@ class PrioritisedReplayBuffer:
 
         if batch_size != len(self.partitions) or not self.__partitions_fixed:
             # t1 = time.time()
-            self.partitions, self.probabilities = self.update_partitions(batch_size)
+            self.partitions, self.probabilities = self.update_partitions(
+                batch_size)
             if self.full:
                 # Once the buffer is full, the partitions no longer need to be updated
                 # (as they depend only on the number of stored transitions and alpha).
@@ -254,16 +267,20 @@ class PrioritisedReplayBuffer:
 
         # t1 = time.time()
 
-        batch_ranks = [np.random.randint(low, high) for low, high in self.partitions]
-        batch_buffer_positions, batch_td_errors, batch_transitions = zip(*[self.priority_heap[rank] for rank in batch_ranks])
-        batch = [torch.stack(tensors).to(device) for tensors in zip(*batch_transitions)]
+        batch_ranks = [np.random.randint(low, high)
+                       for low, high in self.partitions]
+        batch_buffer_positions, batch_td_errors, batch_transitions = zip(
+            *[self.priority_heap[rank] for rank in batch_ranks])
+        batch = [torch.stack(tensors).to(device)
+                 for tensors in zip(*batch_transitions)]
 
         # print("\tbatch sampled in :", time.time() - t1)
         # t1 = time.time()
 
         N = self._capacity if self.full else len(self)
         # Note this is a column vector to match the dimensions of weights and td_target in dqn.train_step(...)
-        sample_probs = torch.FloatTensor([[self.probabilities[rank]] for rank in batch_ranks])
+        sample_probs = torch.FloatTensor(
+            [[self.probabilities[rank]] for rank in batch_ranks])
         weights = (N * sample_probs).pow(-self.beta)
         weights /= weights.max()
 
@@ -277,6 +294,7 @@ class PrioritisedReplayBuffer:
 
     def __len__(self):
         return len(self.priority_heap)
+
 
 class Logger:
     def __init__(self):

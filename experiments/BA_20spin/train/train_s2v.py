@@ -23,28 +23,29 @@ except ImportError:
 
 import time
 
+
 def run(save_loc="BA_20spin/s2v"):
 
-    print("\n----- Running {} -----\n".format(os.path.basename(__file__)))
+    print(f"\n----- Running {os.path.basename(__file__)} -----\n")
 
     ####################################################
     # SET UP ENVIRONMENTAL AND VARIABLES
     ####################################################
 
-    gamma=1
+    gamma = 1
     step_fact = 1
 
-    env_args = {'observables':[Observable.SPIN_STATE],
-                'reward_signal':RewardSignal.DENSE,
-                'extra_action':ExtraAction.NONE,
-                'optimisation_target':OptimisationTarget.CUT,
-                'spin_basis':SpinBasis.BINARY,
-                'norm_rewards':True,
-                'memory_length':None,
-                'horizon_length':None,
-                'stag_punishment':None,
-                'basin_reward':None,
-                'reversible_spins':False}
+    env_args = {'observables': [Observable.SPIN_STATE],  # Use current state only
+                'reward_signal': RewardSignal.DENSE,  #
+                'extra_action': ExtraAction.NONE,
+                'optimisation_target': OptimisationTarget.CUT,
+                'spin_basis': SpinBasis.BINARY,
+                'norm_rewards': True,
+                'memory_length': None,
+                'horizon_length': None,
+                'stag_punishment': None,
+                'basin_reward': None,
+                'reversible_spins': False}
 
     ####################################################
     # SET UP TRAINING AND TEST GRAPHS
@@ -52,7 +53,9 @@ def run(save_loc="BA_20spin/s2v"):
 
     n_spins_train = 20
 
-    train_graph_generator = RandomBarabasiAlbertGraphGenerator(n_spins=n_spins_train,m_insertion_edges=4,edge_type=EdgeType.DISCRETE)
+    train_graph_generator = RandomBarabasiAlbertGraphGenerator(
+        n_spins=n_spins_train, m_insertion_edges=4, edge_type=EdgeType.DISCRETE
+    )  # Generate training samples
 
     ####
     # Pre-generated test graphs
@@ -72,7 +75,6 @@ def run(save_loc="BA_20spin/s2v"):
                                  int(n_spins_train*step_fact),
                                  **env_args)]
 
-
     n_spins_test = train_graph_generator.get().shape[0]
     test_envs = [ising_env.make("SpinSystem",
                                 test_graph_generator,
@@ -83,14 +85,14 @@ def run(save_loc="BA_20spin/s2v"):
     # SET UP FOLDERS FOR SAVING DATA
     ####################################################
 
-    data_folder = os.path.join(save_loc,'data')
+    data_folder = os.path.join(save_loc, 'data')
     network_folder = os.path.join(save_loc, 'network')
 
     mk_dir(data_folder)
     mk_dir(network_folder)
     # print(data_folder)
-    network_save_path = os.path.join(network_folder,'network.pth')
-    test_save_path = os.path.join(network_folder,'test_scores.pkl')
+    network_save_path = os.path.join(network_folder, 'network.pth')
+    test_save_path = os.path.join(network_folder, 'test_scores.pkl')
     loss_save_path = os.path.join(network_folder, 'losses.pkl')
 
     ####################################################
@@ -99,11 +101,11 @@ def run(save_loc="BA_20spin/s2v"):
 
     nb_steps = 2500000
 
-    network_fn = lambda: MPNN(n_obs_in=train_envs[0].observation_space.shape[1],
-                              n_layers=3,
-                              n_features=64,
-                              n_hid_readout=[],
-                              tied_weights=False)
+    def network_fn(): return MPNN(n_obs_in=train_envs[0].observation_space.shape[1],
+                                  n_layers=3,
+                                  n_features=64,
+                                  n_hid_readout=[],
+                                  tied_weights=False)
 
     agent = DQN(train_envs,
 
@@ -154,7 +156,7 @@ def run(save_loc="BA_20spin/s2v"):
                 seed=None
                 )
 
-    print("\n Created DQN agent with network:\n\n", agent.network)
+    print(f"\n Created DQN agent with network:\n\n {agent.network}")
 
     #############
     # TRAIN AGENT

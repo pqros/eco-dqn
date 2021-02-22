@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class MPNN(nn.Module):
     def __init__(self,
                  n_obs_in=7,
@@ -22,21 +23,25 @@ class MPNN(nn.Module):
             nn.ReLU()
         )
 
-        self.edge_embedding_layer = EdgeAndNodeEmbeddingLayer(n_obs_in, n_features)
+        self.edge_embedding_layer = EdgeAndNodeEmbeddingLayer(
+            n_obs_in, n_features)
 
         if self.tied_weights:
-            self.update_node_embedding_layer = UpdateNodeEmbeddingLayer(n_features)
-        else:
-            self.update_node_embedding_layer = nn.ModuleList([UpdateNodeEmbeddingLayer(n_features) for _ in range(self.n_layers)])
+            self.update_node_embedding_layer = UpdateNodeEmbeddingLayer(
+                n_features)
 
-        self.readout_layer = ReadoutLayer(n_features, n_hid_readout)
+        else:
+            self.update_node_embedding_layer = nn.ModuleList(
+                [UpdateNodeEmbeddingLayer(n_features) for _ in range(self.n_layers)])
+
+        self.readout_layer = ReadoutLayer(n_features, n_hid_readout)  # Final Layer
 
     @torch.no_grad()
     def get_normalisation(self, adj):
         norm = torch.sum((adj != 0), dim=1).unsqueeze(-1)
         norm[norm == 0] = 1
         return norm.float()
-        
+
     def forward(self, obs):
         if obs.dim() == 2:
             obs = obs.unsqueeze(0)
@@ -76,14 +81,16 @@ class MPNN(nn.Module):
 
         return out
 
-class EdgeAndNodeEmbeddingLayer(nn.Module):
+
+class EdgeAndNodeEmbeddingLayer(nn.Module):  # Single Layer
 
     def __init__(self, n_obs_in, n_features):
         super().__init__()
         self.n_obs_in = n_obs_in
         self.n_features = n_features
 
-        self.edge_embedding_NN = nn.Linear(int(n_obs_in+1), n_features-1, bias=False)
+        self.edge_embedding_NN = nn.Linear(
+            int(n_obs_in+1), n_features-1, bias=False)
         self.edge_feature_NN = nn.Linear(n_features, n_features, bias=False)
 
     def forward(self, node_features, adj, norm):
@@ -91,17 +98,21 @@ class EdgeAndNodeEmbeddingLayer(nn.Module):
                                    node_features.unsqueeze(-2).transpose(-2, -3).repeat(1, adj.shape[-2], 1, 1)],
                                   dim=-1)
 
-        edge_features *= (adj.unsqueeze(-1)!=0).float()
+        edge_features *= (adj.unsqueeze(-1) != 0).float()
 
-        edge_features_unrolled = torch.reshape(edge_features, (edge_features.shape[0], edge_features.shape[1] * edge_features.shape[1], edge_features.shape[-1]))
-        embedded_edges_unrolled = F.relu(self.edge_embedding_NN(edge_features_unrolled))
+        edge_features_unrolled = torch.reshape(
+            edge_features, (edge_features.shape[0], edge_features.shape[1] * edge_features.shape[1], edge_features.shape[-1]))
+        embedded_edges_unrolled = F.relu(
+            self.edge_embedding_NN(edge_features_unrolled))
         embedded_edges_rolled = torch.reshape(embedded_edges_unrolled,
                                               (adj.shape[0], adj.shape[1], adj.shape[1], self.n_features-1))
         embedded_edges = embedded_edges_rolled.sum(dim=2) / norm
 
-        edge_embeddings = F.relu(self.edge_feature_NN(torch.cat([embedded_edges, norm / norm.max()],dim=-1)))
+        edge_embeddings = F.relu(self.edge_feature_NN(
+            torch.cat([embedded_edges, norm / norm.max()], dim=-1)))
 
         return edge_embeddings
+
 
 class UpdateNodeEmbeddingLayer(nn.Module):
 
@@ -112,10 +123,13 @@ class UpdateNodeEmbeddingLayer(nn.Module):
         self.update_layer = nn.Linear(2*n_features, n_features, bias=False)
 
     def forward(self, current_node_embeddings, edge_embeddings, norm, adj):
-        node_embeddings_aggregated = torch.matmul(adj, current_node_embeddings) / norm
+        node_embeddings_aggregated = torch.matmul(
+            adj, current_node_embeddings) / norm
 
-        message = F.relu(self.message_layer(torch.cat([node_embeddings_aggregated, edge_embeddings], dim=-1)))
-        new_node_embeddings = F.relu(self.update_layer(torch.cat([current_node_embeddings, message], dim=-1)))
+        message = F.relu(self.message_layer(
+            torch.cat([node_embeddings_aggregated, edge_embeddings], dim=-1)))
+        new_node_embeddings = F.relu(self.update_layer(
+            torch.cat([current_node_embeddings, message], dim=-1)))
 
         return new_node_embeddings
 
@@ -126,9 +140,10 @@ class ReadoutLayer(nn.Module):
 
         super().__init__()
 
-        self.layer_pooled = nn.Linear(int(n_features), int(n_features), bias=bias_pool)
+        self.layer_pooled = nn.Linear(
+            int(n_features), int(n_features), bias=bias_pool)
 
-        if type(n_hid)!=list:
+        if type(n_hid) != list:
             n_hid = [n_hid]
 
         n_hid = [2*n_features] + n_hid + [1]
@@ -144,14 +159,16 @@ class ReadoutLayer(nn.Module):
 
         f_local = node_embeddings
 
-        h_pooled = self.layer_pooled(node_embeddings.sum(dim=1) / node_embeddings.shape[1])
-        f_pooled = h_pooled.repeat(1, 1, node_embeddings.shape[1]).view(node_embeddings.shape)
+        h_pooled = self.layer_pooled(
+            node_embeddings.sum(dim=1) / node_embeddings.shape[1])
+        f_pooled = h_pooled.repeat(
+            1, 1, node_embeddings.shape[1]).view(node_embeddings.shape)
 
-        features = F.relu( torch.cat([f_pooled, f_local], dim=-1) )
+        features = F.relu(torch.cat([f_pooled, f_local], dim=-1))
 
         for i, layer in enumerate(self.layers_readout):
             features = layer(features)
-            if i<len(self.layers_readout)-1:
+            if i < len(self.layers_readout)-1:
                 features = F.relu(features)
             else:
                 out = features
